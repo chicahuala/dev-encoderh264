@@ -1,0 +1,6 @@
+LIBRARY EncoderH264
+
+EXPORTS
+	encode_h264_init						@1
+	encode_frame_from_rgb32_to_h264			@2
+	encode_h264_close						@3

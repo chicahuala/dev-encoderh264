@@ -76,6 +76,13 @@ namespace EncoderH264_test.ViewModel
 			set { if (titulo_v != value) { titulo_v = value; NotifyPropertyChanged(); } }
 			}
 
+		string statusReport_v = "none";
+		public string statusReport
+			{
+			get => statusReport_v;
+			set { if (statusReport_v != value) { statusReport_v = value; NotifyPropertyChanged(); } }
+			}
+
 		System.Windows.Media.Imaging.BitmapSource imagenDeEntrada_v = null;
 		public System.Windows.Media.Imaging.BitmapSource imagenDeEntrada
 			{
@@ -106,6 +113,12 @@ namespace EncoderH264_test.ViewModel
 				}
 			}
 
+		int actualDecoderID_v = -1;
+		public int actualDecoderID
+			{
+			get => actualDecoderID_v;
+			set { if (actualDecoderID_v != value) { actualDecoderID_v = value; NotifyPropertyChanged(); } }
+			}
 		#endregion properties_generales
 
 		public MainViewModel()
@@ -128,6 +141,9 @@ namespace EncoderH264_test.ViewModel
 			generaH264FileCommand = new Extras.RelayCommand(GeneraH264File, param => this.canGenMP4File);
 
 			selectImagenDeEntradaSalidaCommand = new Extras.RelayCommand(SelectImagenDeEntradaSalida, param => this.CanSelectImagenDeEntradaSalida);
+
+			initEncoderCommand = new Extras.RelayCommand(InitEncoder, param => this.CanInitEncoder);
+			stopEncoderCommand = new Extras.RelayCommand(StopEncoder, param => this.CanStopEncoder);
 			}
 
 		public void Notify(string propertieName)
@@ -155,6 +171,12 @@ namespace EncoderH264_test.ViewModel
 				{
 				dlg.FileName = string.IsNullOrWhiteSpace(this.lastImagenDeEntrada) ? @"d:\none.jpg" : this.lastImagenDeEntrada;
 				dlg.InitialDirectory = System.IO.Path.GetDirectoryName(dlg.FileName);
+
+				if (actualDecoderID >= 0)
+					{
+					// stop decoder
+					EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, 0, OperationResultInfoCallback, IntPtr.Zero, 0);
+					}
 				}
 			else if (destino == "Salida")
 				{
@@ -176,6 +198,60 @@ namespace EncoderH264_test.ViewModel
 					}
 				}
 			}
+
+		void OperationResultInfoCallback(int iContext, int iStringLen, IntPtr mensage)
+			{
+			//ViewModel.MainViewModel.mainWindows.Dispatcher.Invoke(new Action(() =>
+			//{
+			//}));
+
+			statusReport = $"len: {iStringLen}, msg: {System.Runtime.InteropServices.Marshal.PtrToStringAnsi(mensage)}";
+			// statusReport = $"context: {iContext}, msg len:{iStringLen}, msg: {mensage}";
+			}
+
+		public bool CanInitEncoder { get; set; } = true;
+		public System.Windows.Input.ICommand initEncoderCommand { get; }
+
+		public void InitEncoder(object obj)
+			{
+			Console.WriteLine("InitEncoder");
+
+			if (CanStopEncoder == true) stopEncoderCommand.Execute(null);
+
+			try
+				{
+				actualDecoderID = EncoderH264_test.Extras.interop.encode_h264_init(1280, 768, 420, OperationResultInfoCallback);
+
+				CanStopEncoder = true;
+				CanInitEncoder = false;
+				}
+			catch (Exception ex)
+				{
+				// fallo
+				CanInitEncoder = true;
+				CanStopEncoder = false;
+				}
+			finally
+				{
+
+				}
+			}
+
+		public bool CanStopEncoder { get; set; } = false;
+		public System.Windows.Input.ICommand stopEncoderCommand { get; }
+		public void StopEncoder(object obj)
+			{
+			Console.WriteLine("StopEncoder");
+
+			if (actualDecoderID >= 0)
+				{
+				// stop decoder
+				EncoderH264_test.Extras.interop.encode_h264_close(actualDecoderID, OperationResultInfoCallback);
+				}
+			CanInitEncoder = true;
+			CanStopEncoder = false;
+			}
+
 
 		public bool CanCloseWindows { get; set; } = true;
 
