@@ -91,8 +91,9 @@ class VideoEncoder
 				return size + block_size - (size % block_size);
 			}
 
-		VideoEncoder(std::array<unsigned short, 2> dimensions) : m_width(dimensions[0]), m_height(dimensions[1])
+		VideoEncoder(std::array<unsigned short, 2> dimensions) : m_width(dimensions[0]), m_height(dimensions[1])/* , m_frame_size(4 * Align(m_width) * Align(m_height)) */
 			{
+			m_frame_size = 4 * Align(m_width) * Align(m_height);
 			}
 
 		virtual ~VideoEncoder() = default;
@@ -143,6 +144,8 @@ class VideoEncoder
 			return{ in.b, in.g, in.r, in.a };
 			}
 
+		DWORD m_frame_size;
+
 	protected:
 		const unsigned short m_width;  ///< horizontal img. resolution (excluding padding)
 		const unsigned short m_height; ///< vertical img. resolution (excluding padding)
@@ -150,191 +153,233 @@ class VideoEncoder
 
 
 /** Media-Foundation-based H.264 video encoder. */
-class VideoEncoderMF : public VideoEncoder {
-public:
-	// ** File-based video encoding. **
-	VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps, const wchar_t* filename)
-		: VideoEncoderMF(dimensions, fps)
-		{
-		const unsigned int bit_rate = static_cast<unsigned int>(0.78f * fps * Align(m_width) * Align(m_height)); // yields 40Mb/s for 1920x1080@25fps (max blu-ray quality)
-
-		CComPtr<IMFAttributes> attribs;
-		COM_CHECK(MFCreateAttributes(&attribs, 0));
-		COM_CHECK(attribs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_MPEG4));
-		COM_CHECK(attribs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-
-		// create sink writer with specified output format
-		COM_CHECK(MFCreateSinkWriterFromURL(filename, nullptr, attribs, &m_sink_writer));
-		IMFMediaTypePtr mediaTypeOut = MediaTypeutput(fps, bit_rate);
-		COM_CHECK(m_sink_writer->AddStream(mediaTypeOut, &m_stream_index));
-
-		// connect input to output
-		IMFMediaTypePtr mediaTypeIn = MediaTypeInput(fps);
-		COM_CHECK(m_sink_writer->SetInputMediaType(m_stream_index, mediaTypeIn, nullptr));
-		COM_CHECK(m_sink_writer->BeginWriting());
-		}
-
-	// ** Stream-based video encoding. The underlying MFCreateFMPEG4MediaSink system call require Windows 8 or newer. **
-	VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps, IMFByteStream* stream)
-		: VideoEncoderMF(dimensions, fps)
-		{
-		const unsigned int bit_rate = static_cast<unsigned int>(0.78f * fps * m_width * m_height); // yields 40Mb/s for 1920x1080@25fps
-
-		CComPtr<IMFAttributes> attribs;
-		COM_CHECK(MFCreateAttributes(&attribs, 0));
-		COM_CHECK(attribs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_FMPEG4));
-		COM_CHECK(attribs->SetUINT32(MF_LOW_LATENCY, TRUE));
-		COM_CHECK(attribs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
-
-		// create sink writer with specified output format
-		IMFMediaTypePtr mediaTypeOut = MediaTypeutput(fps, bit_rate);
-		COM_CHECK(MFCreateFMPEG4MediaSink(stream, mediaTypeOut, nullptr, &m_media_sink)); // "fragmented" MPEG4 does not require seekable byte-stream
-		COM_CHECK(MFCreateSinkWriterFromMediaSink(m_media_sink, attribs, &m_sink_writer));
-
-		// connect input to output
-		IMFMediaTypePtr mediaTypeIn = MediaTypeInput(fps);
-		COM_CHECK(m_sink_writer->SetInputMediaType(m_stream_index, mediaTypeIn, nullptr));
-
-		{
-			// access H.264 encoder directly (https://msdn.microsoft.com/en-us/library/windows/desktop/dd797816.aspx)
-		CComPtr<ICodecAPI> codec;
-		COM_CHECK(m_sink_writer->GetServiceForStream(m_stream_index, GUID_NULL, IID_ICodecAPI, (void**)&codec));
-		CComVariant quality;
-		codec->GetValue(&CODECAPI_AVEncCommonQuality, &quality); // not supported by Intel encoder (mfx_mft_h264ve_64.dll)
-		CComVariant low_latency;
-		COM_CHECK(codec->GetValue(&CODECAPI_AVLowLatencyMode, &low_latency));
-		//assert(low_latency.boolVal != FALSE);
-		// CODECAPI_AVEncAdaptiveMode not implemented
-
-		// query group-of-pictures (GoP) size
-		CComVariant gop_size;
-		COM_CHECK(codec->GetValue(&CODECAPI_AVEncMPVGOPSize, &gop_size));
-		//gop_size = (unsigned int)1; // VT_UI4 type
-		//COM_CHECK(codec->SetValue(&CODECAPI_AVEncMPVGOPSize, &gop_size));
-		}
-
-		COM_CHECK(m_sink_writer->BeginWriting());
-		}
-
-	// common constructor
-	VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps) : VideoEncoder(dimensions)
-		{
-		COM_CHECK(MFStartup(MF_VERSION));
-		COM_CHECK(MFFrameRateToAverageTimePerFrame(fps, 1, const_cast<unsigned long long*>(&m_frame_duration)));
-		}
-
-	~VideoEncoderMF() noexcept
-		{
-		HRESULT hr = m_sink_writer->Finalize(); // fails on prior I/O errors
-		hr; // discard error
-
-		// delete objects before shutdown-call
-		m_buffer.Release();
-		m_sink_writer.Release();
-
-		if (m_media_sink)
+class VideoEncoderMF : public VideoEncoder
+	{
+	public:
+		// ** File-based video encoding. **
+		VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps, const wchar_t* filename)
+			: VideoEncoderMF(dimensions, fps)
 			{
-			COM_CHECK(m_media_sink->Shutdown());
-			m_media_sink.Release();
+			const unsigned int bit_rate = static_cast<unsigned int>(0.78f * fps * Align(m_width) * Align(m_height)); // yields 40Mb/s for 1920x1080@25fps (max blu-ray quality)
+
+			CComPtr<IMFAttributes> attribs;
+			COM_CHECK(MFCreateAttributes(&attribs, 0));
+			COM_CHECK(attribs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_MPEG4));
+			COM_CHECK(attribs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
+
+			// create sink writer with specified output format
+			COM_CHECK(MFCreateSinkWriterFromURL(filename, nullptr, attribs, &m_sink_writer));
+			IMFMediaTypePtr mediaTypeOut = MediaTypeutput(fps, bit_rate);
+			COM_CHECK(m_sink_writer->AddStream(mediaTypeOut, &m_stream_index));
+
+			// connect input to output
+			IMFMediaTypePtr mediaTypeIn = MediaTypeInput(fps);
+			COM_CHECK(m_sink_writer->SetInputMediaType(m_stream_index, mediaTypeIn, nullptr));
+			COM_CHECK(m_sink_writer->BeginWriting());
 			}
 
-		COM_CHECK(MFShutdown());
-		}
+		// ** Stream-based video encoding. The underlying MFCreateFMPEG4MediaSink system call require Windows 8 or newer. **
+		VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps, IMFByteStream* stream)
+			: VideoEncoderMF(dimensions, fps)
+			{
+			const unsigned int bit_rate = static_cast<unsigned int>(0.78f * fps * m_width * m_height); // yields 40Mb/s for 1920x1080@25fps
 
-	R8G8B8A8* WriteFrameBegin() override
-		{
-		const DWORD frame_size = 4 * Align(m_width) * Align(m_height);
+			CComPtr<IMFAttributes> attribs;
+			COM_CHECK(MFCreateAttributes(&attribs, 0));
+			COM_CHECK(attribs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_FMPEG4));
+			COM_CHECK(attribs->SetUINT32(MF_LOW_LATENCY, TRUE));
+			COM_CHECK(attribs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
 
-		// Create a new memory buffer.
-		if (!m_buffer)
-			COM_CHECK(MFCreateMemoryBuffer(frame_size, &m_buffer));
+			// create sink writer with specified output format
+			IMFMediaTypePtr mediaTypeOut = MediaTypeutput(fps, bit_rate);
+			COM_CHECK(MFCreateFMPEG4MediaSink(stream, mediaTypeOut, nullptr, &m_media_sink)); // "fragmented" MPEG4 does not require seekable byte-stream
+			COM_CHECK(MFCreateSinkWriterFromMediaSink(m_media_sink, attribs, &m_sink_writer));
 
-		// Lock buffer to get data pointer
-		R8G8B8A8* buffer_ptr = nullptr;
-		COM_CHECK(m_buffer->Lock(reinterpret_cast<BYTE**>(&buffer_ptr), NULL, NULL));
-		return buffer_ptr;
-		}
+			// connect input to output
+			IMFMediaTypePtr mediaTypeIn = MediaTypeInput(fps);
+			COM_CHECK(m_sink_writer->SetInputMediaType(m_stream_index, mediaTypeIn, nullptr));
 
-	HRESULT WriteFrameEnd() override
-		{
-		const DWORD frame_size = 4 * Align(m_width) * Align(m_height);
+			{
+				// access H.264 encoder directly (https://msdn.microsoft.com/en-us/library/windows/desktop/dd797816.aspx)
+			CComPtr<ICodecAPI> codec;
+			COM_CHECK(m_sink_writer->GetServiceForStream(m_stream_index, GUID_NULL, IID_ICodecAPI, (void**)&codec));
+			CComVariant quality;
+			codec->GetValue(&CODECAPI_AVEncCommonQuality, &quality); // not supported by Intel encoder (mfx_mft_h264ve_64.dll)
+			CComVariant low_latency;
+			COM_CHECK(codec->GetValue(&CODECAPI_AVLowLatencyMode, &low_latency));
+			//assert(low_latency.boolVal != FALSE);
+			// CODECAPI_AVEncAdaptiveMode not implemented
 
-		COM_CHECK(m_buffer->Unlock());
+			// query group-of-pictures (GoP) size
+			CComVariant gop_size;
+			COM_CHECK(codec->GetValue(&CODECAPI_AVEncMPVGOPSize, &gop_size));
+			//gop_size = (unsigned int)1; // VT_UI4 type
+			//COM_CHECK(codec->SetValue(&CODECAPI_AVEncMPVGOPSize, &gop_size));
+			}
 
-		// Set the data length of the buffer.
-		COM_CHECK(m_buffer->SetCurrentLength(frame_size));
+			COM_CHECK(m_sink_writer->BeginWriting());
+			}
 
-		// Create a media sample and add the buffer to the sample.
-		IMFSamplePtr sample;
-		COM_CHECK(MFCreateSample(&sample));
-		COM_CHECK(sample->AddBuffer(m_buffer));
+		// common constructor
+		VideoEncoderMF(std::array<unsigned short, 2> dimensions, unsigned int fps) : VideoEncoder(dimensions)
+			{
+			COM_CHECK(MFStartup(MF_VERSION));
+			COM_CHECK(MFFrameRateToAverageTimePerFrame(fps, 1, const_cast<unsigned long long*>(&m_frame_duration)));
+			}
 
-		// Set the time stamp and the duration.
-		COM_CHECK(sample->SetSampleTime(m_time_stamp));
-		COM_CHECK(sample->SetSampleDuration(m_frame_duration));
+		~VideoEncoderMF() noexcept
+			{
+			HRESULT hr = m_sink_writer->Finalize(); // fails on prior I/O errors
+			hr; // discard error
 
-		// send sample to Sink Writer.
-		HRESULT hr = m_sink_writer->WriteSample(m_stream_index, sample); // fails on I/O error
-		if (FAILED(hr))
-			return hr;
+			// delete objects before shutdown-call
+			m_buffer.Release();
+			m_sink_writer.Release();
 
-		// increment time
-		m_time_stamp += m_frame_duration;
-		return S_OK;
-		}
+			if (m_media_sink)
+				{
+				COM_CHECK(m_media_sink->Shutdown());
+				m_media_sink.Release();
+				}
 
-private:
-	IMFMediaTypePtr MediaTypeInput(unsigned int fps)
-		{
-		// configure input format. Frame size is aligned to avoid crash
-		IMFMediaTypePtr mediaTypeIn;
-		COM_CHECK(MFCreateMediaType(&mediaTypeIn));
-		COM_CHECK(mediaTypeIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
-		COM_CHECK(mediaTypeIn->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)); // X8R8G8B8 format
-		COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
-		COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE));
-		// Frame size is aligned to avoid crash
-		COM_CHECK(MFSetAttributeSize(mediaTypeIn, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
-		COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_FRAME_RATE, fps, 1));
-		COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
-		return mediaTypeIn;
-		}
+			COM_CHECK(MFShutdown());
+			}
 
-	IMFMediaTypePtr MediaTypeutput(unsigned int fps, unsigned int bit_rate)
-		{
-		IMFMediaTypePtr mediaTypeOut;
-		COM_CHECK(MFCreateMediaType(&mediaTypeOut));
-		COM_CHECK(mediaTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
-		COM_CHECK(mediaTypeOut->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264)); // H.264 format
-		COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_AVG_BITRATE, bit_rate));
-		COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
-		// Frame size is aligned to avoid crash
-		COM_CHECK(MFSetAttributeSize(mediaTypeOut, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
-		COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_FRAME_RATE, fps, 1));
-		COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
-		return mediaTypeOut;
-		}
+		R8G8B8A8* WriteFrameBegin() override
+			{
+			// const DWORD frame_size = 4 * Align(m_width) * Align(m_height);
 
-	static void COM_CHECK(HRESULT hr)
-		{
-		if (FAILED(hr)) {
-			_com_error err(hr);
+			// Create a new memory buffer.
+			if (!m_buffer)
+				COM_CHECK(MFCreateMemoryBuffer(m_frame_size, &m_buffer));
+
+			// Lock buffer to get data pointer
+			R8G8B8A8* buffer_ptr = nullptr;
+			COM_CHECK(m_buffer->Lock(reinterpret_cast<BYTE**>(&buffer_ptr), NULL, NULL));
+			return buffer_ptr;
+			}
+
+		HRESULT WriteFrameEnd() override
+			{
+			// const DWORD frame_size = 4 * Align(m_width) * Align(m_height);
+
+			COM_CHECK(m_buffer->Unlock());
+
+			// Set the data length of the buffer.
+			COM_CHECK(m_buffer->SetCurrentLength(m_frame_size));
+
+			// Create a media sample and add the buffer to the sample.
+			IMFSamplePtr sample;
+			COM_CHECK(MFCreateSample(&sample));
+			COM_CHECK(sample->AddBuffer(m_buffer));
+
+			// Set the time stamp and the duration.
+			COM_CHECK(sample->SetSampleTime(m_time_stamp));
+			COM_CHECK(sample->SetSampleDuration(m_frame_duration));
+
+			// send sample to Sink Writer.
+			HRESULT hr = m_sink_writer->WriteSample(m_stream_index, sample); // fails on I/O error
+			if (FAILED(hr))
+				return hr;
+
+			// increment time
+			m_time_stamp += m_frame_duration;
+			return S_OK;
+			}
+
+	private:
+		IMFMediaTypePtr MediaTypeInput(unsigned int fps)
+			{
+			// configure input format. Frame size is aligned to avoid crash
+			IMFMediaTypePtr mediaTypeIn;
+			COM_CHECK(MFCreateMediaType(&mediaTypeIn));
+			COM_CHECK(mediaTypeIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
+			COM_CHECK(mediaTypeIn->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)); // X8R8G8B8 format
+			COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
+			COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE));
+
+			// Frame size is aligned to avoid crash
+			COM_CHECK(MFSetAttributeSize(mediaTypeIn, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_FRAME_RATE, fps, 1));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
+			return mediaTypeIn;
+			}
+
+		IMFMediaTypePtr MediaTypeInput24(unsigned int fps)
+			{
+			// configure input format. Frame size is aligned to avoid crash
+			IMFMediaTypePtr mediaTypeIn;
+			COM_CHECK(MFCreateMediaType(&mediaTypeIn));
+			COM_CHECK(mediaTypeIn->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
+			COM_CHECK(mediaTypeIn->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB24));					// D3DFMT_R8G8B8
+			COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
+			COM_CHECK(mediaTypeIn->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE));
+
+			// Frame size is aligned to avoid crash
+			COM_CHECK(MFSetAttributeSize(mediaTypeIn, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_FRAME_RATE, fps, 1));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeIn, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
+			return mediaTypeIn;
+			}
+
+		IMFMediaTypePtr MediaTypeutput(unsigned int fps, unsigned int bit_rate)
+			{
+			IMFMediaTypePtr mediaTypeOut;
+			COM_CHECK(MFCreateMediaType(&mediaTypeOut));
+			COM_CHECK(mediaTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
+			COM_CHECK(mediaTypeOut->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264)); // H.264 format
+			COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_AVG_BITRATE, bit_rate));
+			COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
+
+			// Frame size is aligned to avoid crash
+			COM_CHECK(MFSetAttributeSize(mediaTypeOut, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_FRAME_RATE, fps, 1));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
+			return mediaTypeOut;
+			}
+
+		IMFMediaTypePtr MediaTypeutput(unsigned int fps, unsigned int bit_rate)
+			{
+			IMFMediaTypePtr mediaTypeOut;
+			COM_CHECK(MFCreateMediaType(&mediaTypeOut));
+			COM_CHECK(mediaTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video));
+			COM_CHECK(mediaTypeOut->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264)); // H.264 format
+			COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_AVG_BITRATE, bit_rate));
+			COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive));
+
+			// ver en codecapi.h, eAVEncVideoChromaResolution
+			// AVEncVideoInputChromaResolution
+			// AVEncVideoOutputChromaResolution
+			// hr = pAttributes->SetUINT32(CODECAPI_AVEncMPVGOPSize, 1);			// puede que sea lo mejor
+			COM_CHECK(mediaTypeOut->SetUINT32(MF_MT_MAX_KEYFRAME_SPACING, 0));
+
+			// Frame size is aligned to avoid crash
+			COM_CHECK(MFSetAttributeSize(mediaTypeOut, MF_MT_FRAME_SIZE, Align(m_width), Align(m_height)));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_FRAME_RATE, fps, 1));
+			COM_CHECK(MFSetAttributeRatio(mediaTypeOut, MF_MT_PIXEL_ASPECT_RATIO, 1, 1));
+			return mediaTypeOut;
+			}
+
+		static void COM_CHECK(HRESULT hr)
+			{
+			if (FAILED(hr)) {
+				_com_error err(hr);
 #ifdef _UNICODE
-			const wchar_t* msg = err.ErrorMessage(); // weak ptr.
-			throw std::runtime_error(ToAscii(msg));
+				const wchar_t* msg = err.ErrorMessage(); // weak ptr.
+				throw std::runtime_error(ToAscii(msg));
 #else
-			const char* msg = err.ErrorMessage(); // weak ptr.
-			throw std::runtime_error(msg);
+				const char* msg = err.ErrorMessage(); // weak ptr.
+				throw std::runtime_error(msg);
 #endif
+				}
 			}
-		}
 
-	const unsigned long long m_frame_duration = 0;
-	long long                m_time_stamp = 0;
+		const unsigned long long m_frame_duration = 0;
+		long long                m_time_stamp = 0;
 
-	CComPtr<IMFMediaSink>    m_media_sink;
-	IMFSinkWriterPtr         m_sink_writer;
-	IMFMediaBufferPtr        m_buffer;
-	unsigned long            m_stream_index = 0;
+		CComPtr<IMFMediaSink>    m_media_sink;
+		IMFSinkWriterPtr         m_sink_writer;
+		IMFMediaBufferPtr        m_buffer;
+		unsigned long            m_stream_index = 0;
 	};
 

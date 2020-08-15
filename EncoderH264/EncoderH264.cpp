@@ -193,7 +193,7 @@ ENCODERH264_API int encode_h264_init(int iWidth, int iHeight, int modo, long lon
 	if (opResultCallback > 0)
 		{
 		std::stringstream  ss;
-		ss << "{encode_h264_init} Error al buscar un contexto disponible (operacion no realizada). errCode: " << ret_val;
+		ss << "{encode_h264_init} Error al buscar un contexto disponible (operacion no realizada, sin contextos). errCode: " << ret_val;
 		((OperationResultInfoCallback)opResultCallback)(0, ss.str().length(), ss.str().c_str());
 		}
 	return ret_val;
@@ -213,6 +213,39 @@ ENCODERH264_API int encode_h264_init(int iWidth, int iHeight, int modo, long lon
 // encode_frame_from_rgb32_to_h264 comprime frame to h264
 ENCODERH264_API int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, long long opResultCallback, byte* pImagen, int iImagenDataLen)
 	{
+	if (iContext >= 0)
+		{
+		EnterCriticalSection(&pH264EncodeContext[iContext].context_local_cs);
+		R8G8B8A8 *pBuffer = pH264EncodeContext[iContext].pEncoder->WriteFrameBegin();
+		if (pBuffer)
+			{
+			MoveMemory(pBuffer, pImagen, iImagenDataLen);
+			}
+		else
+			{
+			if (opResultCallback > 0)
+				{
+				string msg = "{encode_frame_from_rgb32_to_h264} no obtuve el buffer desde el encoder, ERROR -100001.";
+				((OperationResultInfoCallback)opResultCallback)(-1, msg.length(), msg.c_str());
+				}
+
+			pH264EncodeContext[iContext].pEncoder->WriteFrameEnd();
+			LeaveCriticalSection(&pH264EncodeContext[iContext].context_local_cs);
+			return -100001;
+			}
+
+		pH264EncodeContext[iContext].pEncoder->WriteFrameEnd();
+
+		if (opResultCallback > 0)
+			{
+			string msg = "{encode_frame_from_rgb32_to_h264} OK frame compress.";
+			((OperationResultInfoCallback)opResultCallback)(-1, msg.length(), msg.c_str());
+			}
+
+		LeaveCriticalSection(&pH264EncodeContext[iContext].context_local_cs);
+		return 0;			// OK
+		}
+
 	if (opResultCallback > 0)
 		{
 		//TCHAR mensaje[1024];
