@@ -166,11 +166,17 @@
     <None Include="EncoderH264.def" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DataStream.h" />
     <ClInclude Include="EncoderH264.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="MemStream.h" />
+    <ClInclude Include="MP4FragmentEditor.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="WebSocket.hpp" />
+    <ClInclude Include="WebStream.hpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="DataStream.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderH264.cpp" />
     <ClCompile Include="pch.cpp">
@@ -179,6 +185,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="WebStream.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

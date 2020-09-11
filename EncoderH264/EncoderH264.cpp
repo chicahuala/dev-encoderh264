@@ -2,15 +2,38 @@
 //
 
 #include "pch.h"
+
+#include <sstream>
+#include <iostream>
+#include <string>
+
+#include <cstddef>
+
+using namespace std;
+
 #include "framework.h"
 #include "EncoderH264.h"
 
-#include <cstddef>
-#include <iostream>
-#include <string>
-#include <sstream>
+#include "WebStream.hpp"
 
-using namespace std;
+#include "DataStream.h"
+
+#include "MemStream.h"
+
+/** Convenience function to create a locally implemented COM instance without the overhead of CoCreateInstance.
+The COM class does not need to be registred for construction to succeed. However, lack of registration can
+cause problems if transporting the class out-of-process. */
+template <class T>
+static CComPtr<T> CreateLocalInstance()
+	{
+	// create an object (with ref. count zero)
+	CComObject<T>* tmp = nullptr;
+	if (FAILED(CComObject<T>::CreateInstance(&tmp)))
+		throw std::runtime_error("CreateInstance failed");
+
+	// move into smart-ptr (will incr. ref. count to one)
+	return CComPtr<T>(static_cast<T*>(tmp));
+	}
 
 //// This is an example of an exported variable
 //ENCODERH264_API int nEncoderH264 = 0;
@@ -32,7 +55,7 @@ extern "C"
 	typedef void(__stdcall* CompresionH264ResultCallback)(int iContext, bool KeyFrame, const byte* pFrameH264, int iFrameH264Len);
 	typedef void(__stdcall* ScaleResultCallback)(int iContext, const byte* pFrameScaleY, const byte* pFrameScaleU, const byte* pFrameScaleV, int iWidth, int iHeight, int iStrideY, int iStrideUV);
 
-	typedef void(__stdcall* OperationResultInfoCallback)(int iContext, int messageLen, const char *pMessage);
+	typedef void(__stdcall* OperationResultInfoCallback)(int iContext, int messageLen, const char* pMessage);
 	}
 
 bool bInicializacionGeneral = false;
@@ -53,7 +76,14 @@ typedef struct _tag_h264EncodeContext
 	CRITICAL_SECTION context_local_cs;
 
 	int coded_width, coded_height;
-	VideoEncoderMF *pEncoder;
+
+	VideoEncoderMF* pEncoder;
+
+	DataStream* pDataStream;
+
+	MemIMFByteStream* pMemIMFByteStream;
+
+	WebStream* pWebStream;
 
 	int iGenericBufferLength;
 	TCHAR* pGenericBuffer;
@@ -107,8 +137,24 @@ static void UnloadAndClear()
 	free(pH264EncodeContext);
 	pH264EncodeContext = NULL;
 
+	MFShutdown();
+
 	LeaveCriticalSection(&encodeCriticalSection);
 	DeleteCriticalSection(&encodeCriticalSection);
+	}
+
+static void COM_CHECK(HRESULT hr)
+	{
+	if (FAILED(hr)) {
+		_com_error err(hr);
+#ifdef _UNICODE
+		const wchar_t* msg = err.ErrorMessage(); // weak ptr.
+		throw std::runtime_error(ToAscii(msg));
+#else
+		const char* msg = err.ErrorMessage(); // weak ptr.
+		throw std::runtime_error(msg);
+#endif
+		}
 	}
 
 void InicializarContextosH264()
@@ -128,6 +174,9 @@ void InicializarContextosH264()
 		atexit(UnloadAndClear);
 		bInicializacionGeneral = true;
 
+		COM_CHECK(MFStartup(MF_VERSION));
+		// COM_CHECK(MFFrameRateToAverageTimePerFrame(fps, 1, const_cast<unsigned long long*>(&m_frame_duration)));
+		
 		LeaveCriticalSection(&encodeCriticalSection);
 		}
 
@@ -173,7 +222,21 @@ ENCODERH264_API int encode_h264_init(int iWidth, int iHeight, int modo, long lon
 			pH264EncodeContext[x].coded_height = iHeight;
 
 			std::array<unsigned short, 2> dims = { static_cast<unsigned short>(pH264EncodeContext[x].coded_width), static_cast<unsigned short>(pH264EncodeContext[x].coded_height) };
-			pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25);
+			std::string fileName("d:\\Cybele\\videos\\encoderh264.h264.mp4");
+			// pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25, fileName.c_str(), true);
+
+			// auto ws = CreateLocalInstance<WebStream>();
+			// auto ds = CreateLocalInstance<DataStream>();
+			// pH264EncodeContext[x].pMemIMFByteStream = CreateLocalInstance<MemIMFByteStream>();
+			// pH264EncodeContext[x].pMemIMFByteStream = new MemIMFByteStream();
+			//pH264EncodeContext[x].pDataStream = CreateLocalInstance<DataStream>();
+			//pH264EncodeContext[x].pDataStream->SetOutputFile(fileName.c_str());
+			// pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25, pH264EncodeContext[x].pDataStream, false);
+			pH264EncodeContext[x].pWebStream = CreateLocalInstance<WebStream>();
+			pH264EncodeContext[x].pWebStream->SetFileEndPoint(fileName.c_str());			// no bloqueante
+			// pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25, pH264EncodeContext[x].pMemIMFByteStream, false);
+			pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25, pH264EncodeContext[x].pWebStream, false);
+			// pH264EncodeContext[x].pEncoder = new VideoEncoderMF(dims, 25, false);
 
 			ret_val = x;
 			LeaveCriticalSection(&pH264EncodeContext[x].context_local_cs);
@@ -211,12 +274,42 @@ ENCODERH264_API int encode_h264_init(int iWidth, int iHeight, int modo, long lon
 	}
 
 // encode_frame_from_rgb32_to_h264 comprime frame to h264
-ENCODERH264_API int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, long long opResultCallback, byte* pImagen, int iImagenDataLen)
+ENCODERH264_API int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, long long opResultCallback, int stride, byte* pImagen, int iImagenDataLen)
 	{
+	int frame_num = 0;
 	if (iContext >= 0)
 		{
+		if (frameNum == 5)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 8)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 10)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 15)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 20)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 25)
+			{
+			frame_num = frameNum;
+			}
+		else if (frameNum == 30)
+			{
+			frame_num = frameNum;
+			}
+
 		EnterCriticalSection(&pH264EncodeContext[iContext].context_local_cs);
-		R8G8B8A8 *pBuffer = pH264EncodeContext[iContext].pEncoder->WriteFrameBegin();
+		R8G8B8A8* pBuffer = pH264EncodeContext[iContext].pEncoder->WriteFrameBegin();
 		if (pBuffer)
 			{
 			MoveMemory(pBuffer, pImagen, iImagenDataLen);
@@ -238,8 +331,9 @@ ENCODERH264_API int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, 
 
 		if (opResultCallback > 0)
 			{
-			string msg = "{encode_frame_from_rgb32_to_h264} OK frame compress.";
-			((OperationResultInfoCallback)opResultCallback)(-1, msg.length(), msg.c_str());
+			std::stringstream  ss;
+			ss << "{encode_frame_from_rgb32_to_h264} OK compress frame: " << frameNum;
+			((OperationResultInfoCallback)opResultCallback)(0, ss.str().length(), ss.str().c_str());
 			}
 
 		LeaveCriticalSection(&pH264EncodeContext[iContext].context_local_cs);

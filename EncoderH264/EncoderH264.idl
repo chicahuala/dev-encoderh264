@@ -1,0 +1,27 @@
+import "oaidl.idl";
+import "ocidl.idl";
+
+#include "olectl.h"
+[uuid(C8B49F63-D5C3-426A-8F1F-7E50430C015E), version(1.0)]
+
+// This is usually the name of your application.
+library EncoderH264
+    {
+    importlib("stdole32.tlb");
+    importlib("stdole2.tlb");
+
+    [uuid(C71BC8FC-4B9B-44E7-AD84-69A84EEDEFD2),
+        oleautomation,
+        dual
+    ]
+    interface IApplication : IDispatch
+        {
+        [id(1), helpstring("method Show")] HRESULT Show(void);
+        };
+
+    [uuid(1446E583-ECA7-4BD3-96F1-395E8EB07E88)]
+    coclass Application
+        {
+        [default] interface IApplication;
+        };
+    };

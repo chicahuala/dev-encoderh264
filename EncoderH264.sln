@@ -16,6 +16,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EncoderH264Console", "EncoderH264Console\EncoderH264Console.vcxproj", "{38E176C2-86A1-4349-B244-537ABD3F085F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,6 +50,16 @@ Global
 		{A61928F7-7019-4055-AA97-C974C1D7F712}.Release|x64.Build.0 = Release|x64
 		{A61928F7-7019-4055-AA97-C974C1D7F712}.Release|x86.ActiveCfg = Release|Any CPU
 		{A61928F7-7019-4055-AA97-C974C1D7F712}.Release|x86.Build.0 = Release|Any CPU
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Debug|Any CPU.ActiveCfg = Debug|Win32
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Debug|x64.ActiveCfg = Debug|x64
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Debug|x64.Build.0 = Debug|x64
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Debug|x86.ActiveCfg = Debug|Win32
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Debug|x86.Build.0 = Debug|Win32
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Release|Any CPU.ActiveCfg = Release|Win32
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Release|x64.ActiveCfg = Release|x64
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Release|x64.Build.0 = Release|x64
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Release|x86.ActiveCfg = Release|Win32
+		{38E176C2-86A1-4349-B244-537ABD3F085F}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

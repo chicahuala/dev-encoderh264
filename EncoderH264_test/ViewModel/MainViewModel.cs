@@ -119,6 +119,13 @@ namespace EncoderH264_test.ViewModel
 			get => actualDecoderID_v;
 			set { if (actualDecoderID_v != value) { actualDecoderID_v = value; NotifyPropertyChanged(); } }
 			}
+
+		int framesCounter_v = 0;
+		public int framesCounter
+			{
+			get => framesCounter_v;
+			set { if (framesCounter_v != value) { framesCounter_v = value; NotifyPropertyChanged(); } }
+			}
 		#endregion properties_generales
 
 		public MainViewModel()
@@ -144,6 +151,7 @@ namespace EncoderH264_test.ViewModel
 
 			initEncoderCommand = new Extras.RelayCommand(InitEncoder, param => this.CanInitEncoder);
 			stopEncoderCommand = new Extras.RelayCommand(StopEncoder, param => this.CanStopEncoder);
+			encodeFramesCommand = new Extras.RelayCommand(EncodeFrames, param => this.CanEncodeFrames);
 			}
 
 		public void Notify(string propertieName)
@@ -152,6 +160,163 @@ namespace EncoderH264_test.ViewModel
 			}
 
 		#region comandos
+		public bool CanEncodeFrames { get => actualDecoderID >= 0; }
+		public System.Windows.Input.ICommand encodeFramesCommand { get; }
+		public void EncodeFrames(object obj)
+			{
+			string destino = obj as string;
+
+			var dlg = new Microsoft.Win32.OpenFileDialog();
+
+			dlg.Multiselect = false;
+			dlg.CheckFileExists = true;
+			dlg.CheckPathExists = true;
+			dlg.DefaultExt = ".bmp";
+			dlg.Title = "Seleccione una imagen bmp / jpg / png";
+			dlg.Filter = "Img files (bmp - png - jpg)|*.bmp;*.png;*.jpg|Todos los files (*.*)|*.*";
+
+			dlg.FileName = string.IsNullOrWhiteSpace(this.lastImagenDeEntrada) ? @"d:\none.jpg" : this.lastImagenDeEntrada;
+			dlg.InitialDirectory = System.IO.Path.GetDirectoryName(dlg.FileName);
+
+			if (dlg.ShowDialog() == true)
+				{
+				this.lastImagenDeEntrada = dlg.FileName;
+				this.imagenDeEntrada = new System.Windows.Media.Imaging.BitmapImage(new Uri(dlg.FileName));
+
+				System.IO.Path.GetDirectoryName(lastImagenDeEntrada);
+				List<string> files = new List<string>(System.IO.Directory.GetFiles(System.IO.Path.GetDirectoryName(lastImagenDeEntrada)));
+
+				framesCounter = 0;
+				foreach (string file in files)
+					{
+					ShowAndEncodeFile(file);
+					continue;
+
+					using (System.IO.FileStream fileStream = new System.IO.FileStream(file, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+						{
+						var img = new System.Windows.Media.Imaging.BitmapImage();
+						img.BeginInit();
+						img.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+						img.StreamSource = fileStream;
+						img.EndInit();
+
+						System.Windows.Media.Imaging.FormatConvertedBitmap newFormatedBitmapSource = new System.Windows.Media.Imaging.FormatConvertedBitmap();
+
+						// BitmapSource objects like FormatConvertedBitmap can only have their properties
+						// changed within a BeginInit/EndInit block.
+						newFormatedBitmapSource.BeginInit();
+
+						// Use the BitmapSource object defined above as the source for this new 
+						// BitmapSource (chain the BitmapSource objects together).
+						newFormatedBitmapSource.Source = img;
+
+
+						// Set the new format to Gray32Float (grayscale).
+						// newFormatedBitmapSource.DestinationFormat = System.Windows.Media.PixelFormats.Bgr24;
+						System.Windows.Media.PixelFormat pxf = System.Windows.Media.PixelFormats.Bgr32;
+						newFormatedBitmapSource.DestinationFormat = pxf;
+						newFormatedBitmapSource.EndInit();
+
+						System.Windows.Int32Rect r = new System.Windows.Int32Rect(0, 0, 0, 0);
+						int stride = newFormatedBitmapSource.PixelWidth * (newFormatedBitmapSource.Format.BitsPerPixel / 8);
+						byte[] pixels = new byte[newFormatedBitmapSource.PixelHeight * stride];
+						newFormatedBitmapSource.CopyPixels(r, pixels, stride, 0);
+
+						unsafe
+							{
+							fixed (byte* p = pixels)
+								{
+								IntPtr ptr = (IntPtr)p;
+								// do you stuff here
+								if (actualDecoderID >= 0)
+									{
+									// encode frame
+									EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, framesCounter++, OperationResultInfoCallback, stride, ptr, pixels.Length);
+									}
+								imagenDeEntrada = System.Windows.Media.Imaging.BitmapSource.Create(newFormatedBitmapSource.PixelWidth, newFormatedBitmapSource.PixelHeight, 96, 96, pxf, null, ptr, pixels.Length, stride);    // bitmap rgb
+								}
+							}
+						}
+					}
+				}
+			}
+
+		async void ShowAndEncodeFile(string file)
+			{
+			var result = await System.Threading.Tasks.Task.Run<bool>(() =>
+			{
+				var img = new System.Windows.Media.Imaging.BitmapImage();
+				img.BeginInit();
+				img.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+				// img.StreamSource = fileStream;
+				img.UriSource = new Uri(file, UriKind.RelativeOrAbsolute);
+				img.EndInit();
+
+				System.Windows.Media.Imaging.FormatConvertedBitmap newFormatedBitmapSource = new System.Windows.Media.Imaging.FormatConvertedBitmap();
+
+				// BitmapSource objects like FormatConvertedBitmap can only have their properties
+				// changed within a BeginInit/EndInit block.
+				newFormatedBitmapSource.BeginInit();
+
+				// Use the BitmapSource object defined above as the source for this new 
+				// BitmapSource (chain the BitmapSource objects together).
+				newFormatedBitmapSource.Source = img;
+
+
+				// Set the new format to Gray32Float (grayscale).
+				// newFormatedBitmapSource.DestinationFormat = System.Windows.Media.PixelFormats.Bgr24;
+				System.Windows.Media.PixelFormat pxf = System.Windows.Media.PixelFormats.Bgr32;
+				newFormatedBitmapSource.DestinationFormat = pxf;
+				newFormatedBitmapSource.EndInit();
+
+				System.Windows.Int32Rect r = new System.Windows.Int32Rect(0, 0, 0, 0);
+				int stride = newFormatedBitmapSource.PixelWidth * (newFormatedBitmapSource.Format.BitsPerPixel / 8);
+				byte[] pixels = new byte[newFormatedBitmapSource.PixelHeight * stride];
+				newFormatedBitmapSource.CopyPixels(r, pixels, stride, 0);
+
+				// imagenDeEntrada = System.Windows.Media.Imaging.BitmapSource.Create(newFormatedBitmapSource.PixelWidth, newFormatedBitmapSource.PixelHeight, 96, 96, pxf, null, pixels, stride);    // bitmap rgb
+
+				unsafe
+					{
+					fixed (byte* p = pixels)
+						{
+						IntPtr ptr = (IntPtr)p;
+						// do you stuff here
+						if (actualDecoderID >= 0)
+							{
+							// encode frame
+							EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, framesCounter++, OperationResultInfoCallback, stride, ptr, pixels.Length);
+							}
+
+						// imagenDeEntrada = System.Windows.Media.Imaging.BitmapSource.Create(newFormatedBitmapSource.PixelWidth, newFormatedBitmapSource.PixelHeight, 96, 96, pxf, null, ptr, pixels.Length, stride);    // bitmap rgb
+						}
+					}
+				//mainWindows.Dispatcher.Invoke(new Action(() =>
+				//{
+				//	imagenDeEntrada = System.Windows.Media.Imaging.BitmapSource.Create(newFormatedBitmapSource.PixelWidth, newFormatedBitmapSource.PixelHeight, 96, 96, pxf, null, pixels, stride);    // bitmap rgb
+
+				//	unsafe
+				//		{
+				//		fixed (byte* p = pixels)
+				//			{
+				//			IntPtr ptr = (IntPtr)p;
+				//			// do you stuff here
+				//			if (actualDecoderID >= 0)
+				//				{
+				//				// encode frame
+				//				EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, framesCounter++, OperationResultInfoCallback, stride, ptr, pixels.Length);
+				//				}
+
+				//			// imagenDeEntrada = System.Windows.Media.Imaging.BitmapSource.Create(newFormatedBitmapSource.PixelWidth, newFormatedBitmapSource.PixelHeight, 96, 96, pxf, null, ptr, pixels.Length, stride);    // bitmap rgb
+				//			}
+				//		}
+
+				//}));
+
+				return true;
+			});
+			}
+
 		public bool CanSelectImagenDeEntradaSalida { get; set; } = true;
 		public System.Windows.Input.ICommand selectImagenDeEntradaSalidaCommand { get; }
 		public void SelectImagenDeEntradaSalida(object obj)
@@ -172,11 +337,11 @@ namespace EncoderH264_test.ViewModel
 				dlg.FileName = string.IsNullOrWhiteSpace(this.lastImagenDeEntrada) ? @"d:\none.jpg" : this.lastImagenDeEntrada;
 				dlg.InitialDirectory = System.IO.Path.GetDirectoryName(dlg.FileName);
 
-				if (actualDecoderID >= 0)
-					{
-					// stop decoder
-					EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, 0, OperationResultInfoCallback, IntPtr.Zero, 0);
-					}
+				//if (actualDecoderID >= 0)
+				//	{
+				//	// encode frame
+				//	EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, 0, OperationResultInfoCallback, IntPtr.Zero, 0);
+				//	}
 				}
 			else if (destino == "Salida")
 				{
@@ -190,6 +355,74 @@ namespace EncoderH264_test.ViewModel
 					{
 					this.lastImagenDeEntrada = dlg.FileName;
 					this.imagenDeEntrada = new System.Windows.Media.Imaging.BitmapImage(new Uri(dlg.FileName));
+
+					using (System.IO.FileStream fileStream = new System.IO.FileStream(dlg.FileName, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+						{
+						var img = new System.Windows.Media.Imaging.BitmapImage();
+						img.BeginInit();
+						img.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+						img.StreamSource = fileStream;
+						img.EndInit();
+
+						System.Windows.Media.Imaging.FormatConvertedBitmap newFormatedBitmapSource = new System.Windows.Media.Imaging.FormatConvertedBitmap();
+
+						// BitmapSource objects like FormatConvertedBitmap can only have their properties
+						// changed within a BeginInit/EndInit block.
+						newFormatedBitmapSource.BeginInit();
+
+						// Use the BitmapSource object defined above as the source for this new 
+						// BitmapSource (chain the BitmapSource objects together).
+						newFormatedBitmapSource.Source = img;
+
+
+						// Set the new format to Gray32Float (grayscale).
+						newFormatedBitmapSource.DestinationFormat = System.Windows.Media.PixelFormats.Bgr24;
+						newFormatedBitmapSource.EndInit();
+
+						System.Windows.Int32Rect r = new System.Windows.Int32Rect(0, 0, 0, 0);
+						int stride = newFormatedBitmapSource.PixelWidth * (newFormatedBitmapSource.Format.BitsPerPixel / 8);
+						byte[] pixels = new byte[newFormatedBitmapSource.PixelHeight * stride];
+						newFormatedBitmapSource.CopyPixels(r, pixels, stride, 0);
+
+						// pixels es el buffer que tiene los pixeles formados por 3 bytes consecutivos
+
+						unsafe
+							{
+							fixed (byte* p = pixels)
+								{
+								IntPtr ptr = (IntPtr)p;
+								// do you stuff here
+								if (actualDecoderID >= 0)
+									{
+									// encode frame
+									EncoderH264_test.Extras.interop.encode_frame_from_rgb32_to_h264(actualDecoderID, framesCounter++, OperationResultInfoCallback, stride, ptr, pixels.Length);
+									}
+								}
+							}
+
+						//if (false)
+						//	{
+						//	imgVivoRGB = System.Windows.Media.Imaging.BitmapSource.Create(_width, _height, 96, 96, System.Windows.Media.PixelFormats.Bgr24, null, pRGB24, _stride * _height * 3, _width * 3);    // bitmap rgb
+
+						//	int Bpp = System.Windows.Media.PixelFormats.Rgb24.BitsPerPixel / 8;
+						//	if (earg.frameDataY_source != IntPtr.Zero)
+						//		{
+						//		// imagen gray from yuv IntPtr
+						//		this.imagenSource = System.Windows.Media.Imaging.BitmapSource.Create(earg.width, earg.height, 96, 96, System.Windows.Media.PixelFormats.Gray8, null, earg.frameDataY_source, earg.stride * earg.height, earg.stride);
+						//		}
+
+						//	// BitmapSource from rgb bytes
+						//	this.imagenVivoRGB = System.Windows.Media.Imaging.BitmapSource.Create(_width, _height, 96, 96, System.Windows.Media.PixelFormats.Bgr24, null, rgbImagen, _width * 3);    // bitmap rgb
+
+						//	// BitmapSource from IntPtr buffer
+						//	this.imagenVivo = System.Windows.Media.Imaging.BitmapSource.Create(this.width, this.height, 96, 96, System.Windows.Media.PixelFormats.Bgr24, null, this.internalBufferBM, this.internalBufferBM_length, this.width * 3);    // bitmap rgb
+
+						//	// esto es gdi/gdi+
+						//	System.Drawing.Bitmap bmp = new System.Drawing.Bitmap(dlg.FileName);
+						//	// System.Drawing.Bitmap bmp2 = bmp.Clone(System.Drawing.Rectangle.Empty, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+						//	System.Drawing.Imaging.BitmapData bmd = bmp.LockBits(new System.Drawing.Rectangle(0, 0, bmp.Width, bmp.Height), System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+						//	}
+						}
 					}
 				else if (destino == "Salida")
 					{
@@ -220,7 +453,7 @@ namespace EncoderH264_test.ViewModel
 
 			try
 				{
-				actualDecoderID = EncoderH264_test.Extras.interop.encode_h264_init(1280, 768, 420, OperationResultInfoCallback);
+				actualDecoderID = EncoderH264_test.Extras.interop.encode_h264_init(1920, 1080, 420, OperationResultInfoCallback);
 
 				CanStopEncoder = true;
 				CanInitEncoder = false;
@@ -247,6 +480,7 @@ namespace EncoderH264_test.ViewModel
 				{
 				// stop decoder
 				EncoderH264_test.Extras.interop.encode_h264_close(actualDecoderID, OperationResultInfoCallback);
+				actualDecoderID = -1;
 				}
 			CanInitEncoder = true;
 			CanStopEncoder = false;

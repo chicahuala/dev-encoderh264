@@ -44,6 +44,7 @@
 		<StackPanel Orientation="Horizontal" Grid.Column="2" Grid.Row="1">
 			<Button Content=" Init encoder "  VerticalAlignment="Top" Command="{Binding initEncoderCommand}"/>
 			<Button Content=" Stop encoder "  VerticalAlignment="Top" Command="{Binding stopEncoderCommand}" Margin="10, 0, 0, 0"/>
+			<Button Content=" Encode dir frames "  VerticalAlignment="Top" Command="{Binding encodeFramesCommand}" Margin="10, 0, 0, 0"/>
 		</StackPanel>
 
 		<Button Content="Load Imagen" Grid.Column="2" Grid.Row="3" VerticalAlignment="Top" Command="{Binding selectImagenDeEntradaSalidaCommand}" CommandParameter="Entrada" />

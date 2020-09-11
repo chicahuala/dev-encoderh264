@@ -22,7 +22,7 @@ namespace EncoderH264_test.Extras
 		public static extern int encode_h264_init(int iWidth, int iHeight, int modo, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.FunctionPtr)] OperationResultInfoCallbackDelegate resultReport);
 
 		[System.Runtime.InteropServices.DllImport(dllTarget_encoderH264, CharSet = System.Runtime.InteropServices.CharSet.Auto, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
-		public static extern int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.FunctionPtr)] OperationResultInfoCallbackDelegate resultReport, IntPtr pImagen, int iImagenDataLen);
+		public static extern int encode_frame_from_rgb32_to_h264(int iContext, int frameNum, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.FunctionPtr)] OperationResultInfoCallbackDelegate resultReport, int stride, IntPtr pImagen, int iImagenDataLen);
 
 		[System.Runtime.InteropServices.DllImport(dllTarget_encoderH264, CharSet = System.Runtime.InteropServices.CharSet.Auto, CallingConvention = System.Runtime.InteropServices.CallingConvention.Cdecl)]
 		public static extern int encode_h264_close(int iContext, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.FunctionPtr)] OperationResultInfoCallbackDelegate resultReport);
