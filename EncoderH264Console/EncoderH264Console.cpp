@@ -5,6 +5,7 @@
 
 #include <Gdiplus.h>
 #include <gdiplusheaders.h>
+#include <Gdipluspixelformats.h>
 
 using namespace Gdiplus;
 #pragma comment(lib, "gdiplus.lib")
@@ -189,10 +190,14 @@ int main(int argc, char* argv[])
 		path += '\\';
 		}
 
+	std::string files_dir(path);
 	path += "*.jpg";
 
 	std::wstring w_path;
 	StringToWString(w_path, path);
+
+	std::wstring w_files_dir;
+	StringToWString(w_files_dir, files_dir);
 
 	//MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, argv[1], -1, );
 	//WideCharToMultiByte();
@@ -204,19 +209,161 @@ int main(int argc, char* argv[])
 	if (hFind != INVALID_HANDLE_VALUE)
 		{
 		do {
-			vs.push_back(FindFileData.cFileName);
+			vs.push_back(w_files_dir + FindFileData.cFileName);
 			} while (FindNextFile(hFind, &FindFileData));
 			FindClose(hFind);
 		}
 
 	std::cout << "count:" << vs.size() << "\n";
+
+	// init gdi+
+	GdiplusStartupInput gdiplusStartupInput;
+	ULONG_PTR gdiplusToken;
+	GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
+	Image* pImg = nullptr;
+	Bitmap* pBitmap = nullptr;
 	for (auto file : vs)
 		{
+		if (pImg)
+			{
+			delete pImg;
+			pImg = nullptr;
+			}
+
+		if (pBitmap)
+			{
+			delete pBitmap;
+			pBitmap = nullptr;
+			}
+
 		std::wcout << file << std::endl;
 
-		Image* pImg = nullptr;
-		// pImg = FromFile(IN const WCHAR * filename, IN BOOL        useEmbeddedColorManagement);
+		//pImg = Image::FromFile(file.c_str(), true);
+		//if (pImg)
+		//	{
+		//	PixelFormat pf = pImg->GetPixelFormat();
+
+		//	GUID rawFormat;
+		//	pImg->GetRawFormat(&rawFormat);
+
+		//	// Get the bounding rectangle for the image (metafile).
+		//	RectF boundsRect;
+		//	Unit unit;
+		//	pImg->GetBounds(&boundsRect, &unit);
+		//	printf("Image size %.0fx%.0f.\n", boundsRect.Width, boundsRect.Height);
+		//	printf("Image size %d x %d.\n", pImg->GetWidth(), pImg->GetHeight());
+
+		//	// How many frame dimensions does the Image object have?
+		//	UINT count = 0;
+		//	count = pImg->GetFrameDimensionsCount();
+		//	printf("The number of dimensions is %d.\n", count);
+		//	GUID* pDimensionIDs = (GUID*)malloc(sizeof(GUID) * count);
+
+		//	// Get the list of frame dimensions from the Image object.
+		//	pImg->GetFrameDimensionsList(pDimensionIDs, count);
+
+		//	// Display the GUID of the first (and only) frame dimension.
+		//	WCHAR strGuid[39];
+		//	StringFromGUID2(pDimensionIDs[0], strGuid, 39);
+		//	wprintf(L"The first (and only) dimension ID is %s.\n", strGuid);
+
+		//	// Get the number of frames in the first dimension.
+		//	UINT frameCount = pImg->GetFrameCount(&pDimensionIDs[0]);
+		//	printf("The number of frames in that dimension is %d.\n", frameCount);
+
+		//	free(pDimensionIDs);
+		//	}
+
+		pBitmap = Bitmap::FromFile(file.c_str(), true);
+		if (pBitmap)
+			{
+			// ----------------------------------------------------------------------------------------------
+			std::wstring pngFile(file);
+			pngFile += L".png";
+
+			std::wstring gifFile(file);
+			gifFile += L".gif";
+
+			Gdiplus::BitmapData bmd;
+			Gdiplus::Rect rect(0, 0, pBitmap->GetWidth(), pBitmap->GetHeight());
+			if (Gdiplus::Ok == pBitmap->LockBits(
+				&rect, //A rectangle structure that specifies the portion of the Bitmap to lock.
+				Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite, //ImageLockMode values that specifies the access level (read/write) for the Bitmap.
+				PixelFormat32bppRGB, // PixelFormat values that specifies the data format of the Bitmap.
+				&bmd //BitmapData that will contain the information about the lock operation.
+				))
+				{
+				 //get the lenght of the bitmap data in bytes
+				int len = bmd.Height * std::abs(bmd.Stride);
+
+				BYTE* buffer = new BYTE[len];
+				memcpy(bmd.Scan0, buffer, len);//copy it to an array of BYTEs
+
+				pBitmap->UnlockBits(&bmd);
+
+				//... 
+				Bitmap bmp(pBitmap->GetWidth(), pBitmap->GetHeight(), 4 * pBitmap->GetWidth(), PixelFormat32bppRGB, buffer);
+
+				CLSID pngClsid;
+				//Save to PNG
+				CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
+				bmp.Save(pngFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+
+				//cleanup
+				delete[]buffer;
+				}
+			// pBitmap->ConvertFormat(PixelFormat32bppARGB, DitherTypeNone, PaletteTypeCustom, nullptr, 0);
+
+			Status status = pBitmap->LockBits(&rect, ImageLockModeRead, PixelFormat32bppRGB, &bmd);
+
+			//Get the individual pixels from the locked area.
+			auto* pixels = static_cast<unsigned*>(bmd.Scan0);
+
+			//Vector of vectors; each vector is a column.
+			std::vector<std::vector<unsigned>> resultPixels(pBitmap->GetWidth(), std::vector<unsigned>(pBitmap->GetHeight()));
+
+			const int stride = abs(bmd.Stride);
+
+			// hacer algo con los bits
+			status = pBitmap->UnlockBits(&bmd);
+
+			if (false)
+				{
+				// save a converted file, probado funciona
+				CLSID pngClsid;
+				//Save to PNG
+				CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
+				pBitmap->Save(pngFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+
+				//Save to GIF
+				CLSIDFromString(L"{557cf402-1a04-11d3-9a73-0000f81ef32e}", &pngClsid);
+				pBitmap->Save(gifFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+
+				// and here's IDs for other formats:
+				// bmp: {557cf400-1a04-11d3-9a73-0000f81ef32e}
+				// jpg: {557cf401-1a04-11d3-9a73-0000f81ef32e}
+				// gif: {557cf402-1a04-11d3-9a73-0000f81ef32e}
+				// tif: {557cf405-1a04-11d3-9a73-0000f81ef32e}
+				// png: {557cf406-1a04-11d3-9a73-0000f81ef32e}
+				}
+			}
 		}
+
+	if (pImg)
+		{
+		delete pImg;
+		pImg = nullptr;
+		}
+
+	if (pBitmap)
+		{
+		delete pBitmap;
+		pBitmap = nullptr;
+		}
+
+	// un-init gdi+
+	GdiplusShutdown(gdiplusToken);
 
 #if (false)
 	// create H.264/MPEG4 encoder
@@ -244,15 +391,15 @@ int main(int argc, char* argv[])
 		Sleep(1000 / FPS);
 		}
 #endif
-	}
+			}
 
-	// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-	// Debug program: F5 or Debug > Start Debugging menu
+			// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
+			// Debug program: F5 or Debug > Start Debugging menu
 
-	// Tips for Getting Started: 
-	//   1. Use the Solution Explorer window to add/manage files
-	//   2. Use the Team Explorer window to connect to source control
-	//   3. Use the Output window to see build output and other messages
-	//   4. Use the Error List window to view errors
-	//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-	//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
+			// Tips for Getting Started: 
+			//   1. Use the Solution Explorer window to add/manage files
+			//   2. Use the Team Explorer window to connect to source control
+			//   3. Use the Output window to see build output and other messages
+			//   4. Use the Error List window to view errors
+			//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
+			//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
