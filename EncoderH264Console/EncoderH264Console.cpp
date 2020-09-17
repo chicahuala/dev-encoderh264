@@ -163,6 +163,45 @@ void UsagePrint(const char* const mensajeExtra)
 	std::cout << "Example: EncoderH264Console.exe d:\\imagenes d:\\videos\\fileH264" << std::endl << std::flush;
 	}
 
+#pragma warning(disable:4189)
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
+	{
+	UINT  num = 0;          // number of image encoders
+	UINT  size = 0;         // size of the image encoder array in bytes
+
+	Gdiplus::ImageCodecInfo* pImageCodecInfo = NULL;
+
+	Gdiplus::GetImageEncodersSize(&num, &size);
+	if (size == 0)
+		return -1;  // Failure
+
+	pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+	if (pImageCodecInfo == NULL)
+		return -1;  // Failure
+
+	Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
+
+	for (UINT j = 0; j < num; ++j)
+		{
+		if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0)
+			{
+			*pClsid = pImageCodecInfo[j].Clsid;
+			free(pImageCodecInfo);
+			return j;  // Success
+			} // if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) 
+
+		} // Next j 
+
+	free(pImageCodecInfo);
+	return -1;  // Failure
+	}
+
+void writeFileBytes(const std::wstring fn, std::vector<std::vector<DWORD>>& fileBytes)
+	{
+	std::ofstream file(fn, std::ios::out | std::ios::binary);
+	file.write(fileBytes.size() ? (char*)&fileBytes[0] : 0, std::streamsize(fileBytes.size()));
+	}
+
 int main(int argc, char* argv[])
 	{
 	std::cout << "EncoderH264Console: test app de h264 encoder." << std::endl;
@@ -223,6 +262,21 @@ int main(int argc, char* argv[])
 
 	Image* pImg = nullptr;
 	Bitmap* pBitmap = nullptr;
+	bool breakLoop = false;
+	int count = 0;
+
+	CLSID pngClsid;
+	CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
+
+	CLSID gifClsid;
+	CLSIDFromString(L"{557cf402-1a04-11d3-9a73-0000f81ef32e}", &gifClsid);
+
+	CLSID bmpClsid;
+	CLSIDFromString(L"{557cf400-1a04-11d3-9a73-0000f81ef32e}", &gifClsid);
+
+	CLSID jpgClsid;
+	CLSIDFromString(L"{557cf401-1a04-11d3-9a73-0000f81ef32e}", &gifClsid);
+
 	for (auto file : vs)
 		{
 		if (pImg)
@@ -236,6 +290,10 @@ int main(int argc, char* argv[])
 			delete pBitmap;
 			pBitmap = nullptr;
 			}
+
+		// stop control
+		if (breakLoop) break;
+		if (count++ >= 2) break;
 
 		std::wcout << file << std::endl;
 
@@ -279,66 +337,34 @@ int main(int argc, char* argv[])
 		if (pBitmap)
 			{
 			// ----------------------------------------------------------------------------------------------
+			std::wstring rawFile(file);
+			rawFile += L".bin";
+
+			std::wstring rawFileX(file);
+			rawFileX += L".x.bin";
+
+			std::wstring pngFile0(file);
+			pngFile0 += L".0.png";
+
 			std::wstring pngFile(file);
-			pngFile += L".png";
+			pngFile += L".1.png";
+
+			std::wstring pngFileOri(file);
+			pngFileOri += L".2.png";
 
 			std::wstring gifFile(file);
-			gifFile += L".gif";
+			gifFile += L".1.gif";
 
-			Gdiplus::BitmapData bmd;
-			Gdiplus::Rect rect(0, 0, pBitmap->GetWidth(), pBitmap->GetHeight());
-			if (Gdiplus::Ok == pBitmap->LockBits(
-				&rect, //A rectangle structure that specifies the portion of the Bitmap to lock.
-				Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite, //ImageLockMode values that specifies the access level (read/write) for the Bitmap.
-				PixelFormat32bppRGB, // PixelFormat values that specifies the data format of the Bitmap.
-				&bmd //BitmapData that will contain the information about the lock operation.
-				))
-				{
-				 //get the lenght of the bitmap data in bytes
-				int len = bmd.Height * std::abs(bmd.Stride);
+			Gdiplus::Status stts;
 
-				BYTE* buffer = new BYTE[len];
-				memcpy(bmd.Scan0, buffer, len);//copy it to an array of BYTEs
-
-				pBitmap->UnlockBits(&bmd);
-
-				//... 
-				Bitmap bmp(pBitmap->GetWidth(), pBitmap->GetHeight(), 4 * pBitmap->GetWidth(), PixelFormat32bppRGB, buffer);
-
-				CLSID pngClsid;
-				//Save to PNG
-				CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
-				bmp.Save(pngFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
-
-				//cleanup
-				delete[]buffer;
-				}
-			// pBitmap->ConvertFormat(PixelFormat32bppARGB, DitherTypeNone, PaletteTypeCustom, nullptr, 0);
-
-			Status status = pBitmap->LockBits(&rect, ImageLockModeRead, PixelFormat32bppRGB, &bmd);
-
-			//Get the individual pixels from the locked area.
-			auto* pixels = static_cast<unsigned*>(bmd.Scan0);
-
-			//Vector of vectors; each vector is a column.
-			std::vector<std::vector<unsigned>> resultPixels(pBitmap->GetWidth(), std::vector<unsigned>(pBitmap->GetHeight()));
-
-			const int stride = abs(bmd.Stride);
-
-			// hacer algo con los bits
-			status = pBitmap->UnlockBits(&bmd);
-
-			if (false)
+			if (true)
 				{
 				// save a converted file, probado funciona
-				CLSID pngClsid;
 				//Save to PNG
-				CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
-				pBitmap->Save(pngFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+				stts = pBitmap->Save(pngFile0.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
 
 				//Save to GIF
-				CLSIDFromString(L"{557cf402-1a04-11d3-9a73-0000f81ef32e}", &pngClsid);
-				pBitmap->Save(gifFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+				// stts = pBitmap->Save(gifFile.c_str(), &gifClsid, (Gdiplus::EncoderParameters*)NULL);
 
 				// and here's IDs for other formats:
 				// bmp: {557cf400-1a04-11d3-9a73-0000f81ef32e}
@@ -346,6 +372,162 @@ int main(int argc, char* argv[])
 				// gif: {557cf402-1a04-11d3-9a73-0000f81ef32e}
 				// tif: {557cf405-1a04-11d3-9a73-0000f81ef32e}
 				// png: {557cf406-1a04-11d3-9a73-0000f81ef32e}
+
+				//m_mtMap[".jpeg"] = "image/jpeg";
+				//m_mtMap[".jpe"] = "image/jpeg";
+				//m_mtMap[".jpg"] = "image/jpeg";
+				//m_mtMap[".png"] = "image/png";
+				//m_mtMap[".gif"] = "image/gif";
+				//m_mtMap[".tiff"] = "image/tiff";
+				//m_mtMap[".tif"] = "image/tiff";
+				//m_mtMap[".bmp"] = "image/bmp";
+
+				//CLSID pngClsid_1;
+				//int result = GetEncoderClsid(L"image/png", &pngClsid_1);
+				}
+
+			Gdiplus::BitmapData bmd_1;
+			Gdiplus::Rect rect(0, 0, pBitmap->GetWidth(), pBitmap->GetHeight());
+
+			stts = pBitmap->LockBits(
+				&rect, //A rectangle structure that specifies the portion of the Bitmap to lock.
+				// Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite, //ImageLockMode values that specifies the access level (read/write) for the Bitmap.
+				Gdiplus::ImageLockModeRead, //ImageLockMode values that specifies the access level (read/write) for the Bitmap.
+				PixelFormat32bppRGB, // PixelFormat values that specifies the data format of the Bitmap.
+				&bmd_1 //BitmapData that will contain the information about the lock operation.
+				);
+
+			if (Gdiplus::Ok == stts)
+				{
+				int w = bmd_1.Width;
+				int h = bmd_1.Height;
+				int s = bmd_1.Stride;
+
+				 //get the lenght of the bitmap data in bytes
+				int len = bmd_1.Height * abs(bmd_1.Stride);
+
+				auto* pixels = static_cast<unsigned*>(bmd_1.Scan0);
+
+				//Vector of vectors; each vector is a column.
+				std::vector<std::vector<DWORD>> resultPixels(w, std::vector<DWORD>(h));
+
+				BYTE* buffer = new BYTE[len];
+				memcpy(bmd_1.Scan0, buffer, len);	//copy it to an array of BYTEs
+
+				int buffPos = 0;
+
+				FILE* pFileX;
+				errno_t err = _wfopen_s(&pFileX, rawFileX.c_str(), L"wb");
+				if (err != 0)
+					{
+					}
+
+				const int stride = abs(bmd_1.Stride);
+				for (int x = 0; x < w; x++)
+					{
+					for (int y = 0; y < h; y++)
+						{
+						//Get the pixel colour from the pixels array which we got earlier.
+						const unsigned pxColor = pixels[y * stride / 4 + x];
+
+						//Get each individual colour component. Bitmap colours are in reverse order.
+						const unsigned red = (pxColor & 0xFF0000) >> 16;
+						const unsigned green = (pxColor & 0xFF00) >> 8;
+						const unsigned blue = pxColor & 0xFF;
+
+						//Combine the values in a more typical RGB format (as opposed to the bitmap way).
+						const int rgbValue = RGB(red, green, blue);
+
+						//Assign this RGB value to the pixel location in the vector o' vectors.
+						resultPixels[x][y] = rgbValue;
+
+						buffer[buffPos++] = 0;
+						buffer[buffPos++] = red;
+						buffer[buffPos++] = green;
+						buffer[buffPos++] = blue;
+						}
+					}
+
+				if (pFileX)
+					{
+					fclose(pFileX);
+					pFileX = nullptr;
+					}
+
+				writeFileBytes(rawFile + L".r.bin", resultPixels);
+
+				pBitmap->UnlockBits(&bmd_1);
+
+				DWORD* pPixels = (DWORD*)buffer;
+				DWORD pixelVal = (127 << 24) + (127 << 16) + (127 << 8);
+				int stridePos = 0;
+				for (int d = 0; d < 16; d++)
+					{
+					stridePos = d * w;
+					for (int x = 0; x < 64; x++)
+						{
+						pPixels[stridePos + x] = pixelVal;
+						}
+					}
+
+				//... 
+				Bitmap bmp(w, h, s, PixelFormat32bppRGB, buffer);
+				//if (Gdiplus::Ok == bmp.LockBits(&rect, Gdiplus::ImageLockModeRead | Gdiplus::ImageLockModeWrite, PixelFormat32bppRGB, &bmd_1))
+				//	{
+				//	memcpy(buffer, bmd_1.Scan0, len);	//copy it to an array of BYTEs
+				//	}
+
+				//CLSID pngClsid_1;
+				//int result = GetEncoderClsid(L"image/png", &pngClsid_1);
+
+				Gdiplus::EncoderParameters encoderParameters;
+
+				encoderParameters.Count = 1;
+				encoderParameters.Parameter[0].Guid = Gdiplus::EncoderQuality;
+				encoderParameters.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+				encoderParameters.Parameter[0].NumberOfValues = 1;
+
+				ULONG quality = 100;
+				encoderParameters.Parameter[0].Value = &quality;
+
+				// bmp.Save(pngFile.c_str(), &pngClsid_1, (Gdiplus::EncoderParameters*)NULL);
+				stts = bmp.Save(pngFile.c_str(), &pngClsid, &encoderParameters);
+
+				//CLSID pngClsid;
+				////Save to PNG
+				//CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &pngClsid);
+				//bmp.Save(pngFile.c_str(), &pngClsid, (Gdiplus::EncoderParameters*)NULL);
+
+				FILE* pFile;
+				err = _wfopen_s(&pFile, rawFile.c_str(), L"wb");
+				if (err == 0)
+					{
+					fwrite(buffer, 1, len, pFile);
+					fclose(pFile);
+					}
+
+				//cleanup
+				delete[]buffer;
+
+				// pBitmap->Save(pngFileOri.c_str(), &pngClsid_1, (Gdiplus::EncoderParameters*)NULL);
+				}
+			// pBitmap->ConvertFormat(PixelFormat32bppARGB, DitherTypeNone, PaletteTypeCustom, nullptr, 0);
+
+			if (false)
+				{
+				Gdiplus::BitmapData bmd_2;
+				Status status = pBitmap->LockBits(&rect, ImageLockModeRead, PixelFormat32bppRGB, &bmd_2);
+
+				//Get the individual pixels from the locked area.
+				auto* pixels = static_cast<unsigned*>(bmd_2.Scan0);
+
+				//Vector of vectors; each vector is a column.
+				std::vector<std::vector<unsigned>> resultPixels(pBitmap->GetWidth(), std::vector<unsigned>(pBitmap->GetHeight()));
+
+				const int stride = abs(bmd_2.Stride);
+
+				// hacer algo con los bits
+				status = pBitmap->UnlockBits(&bmd_2);
 				}
 			}
 		}
@@ -391,15 +573,15 @@ int main(int argc, char* argv[])
 		Sleep(1000 / FPS);
 		}
 #endif
-			}
+	}
 
-			// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-			// Debug program: F5 or Debug > Start Debugging menu
+	// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
+	// Debug program: F5 or Debug > Start Debugging menu
 
-			// Tips for Getting Started: 
-			//   1. Use the Solution Explorer window to add/manage files
-			//   2. Use the Team Explorer window to connect to source control
-			//   3. Use the Output window to see build output and other messages
-			//   4. Use the Error List window to view errors
-			//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-			//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
+	// Tips for Getting Started: 
+	//   1. Use the Solution Explorer window to add/manage files
+	//   2. Use the Team Explorer window to connect to source control
+	//   3. Use the Output window to see build output and other messages
+	//   4. Use the Error List window to view errors
+	//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
+	//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
